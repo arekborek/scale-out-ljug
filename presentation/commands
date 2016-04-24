@@ -1,0 +1,25 @@
+-- pierwsze uruchomienie
+mvn clean spring-boot:run
+docker run -p 5432:5432 --name postgres-scale-out -e POSTGRES_PASSWORD=pass -e POSTGRES_DB=scale_out -d postgres
+curl -H "Authorization: Basic $(echo -n 'admin:admin' | base64)" localhost:8080/ping
+
+-- dockerizing
+mvn clean
+mvn package
+mvn docker:build
+docker push aborek/base-scale-out
+
+-- instalacja kubernetes.io
+K8S_VERSION=1.2.1
+docker run --volume=/:/rootfs:ro --volume=/sys:/sys:ro --volume=/var/lib/docker/:/var/lib/docker:rw --volume=/var/lib/kubelet/:/var/lib/kubelet:rw --volume=/var/run:/var/run:rw --net=host --pid=host --privileged=true --name=kubelet -d gcr.io/google_containers/hyperkube-amd64:v${K8S_VERSION} /hyperkube kubelet --containerized --hostname-override="127.0.0.1" --address="0.0.0.0" --api-servers=http://localhost:8080 --config=/etc/kubernetes/manifests --allow-privileged=true --v=2
+
+kubectl run postgres-scale-out --image=postgres --env="POSTGRES_PASSWORD=pass" --env="POSTGRES_DB=scale_out"
+kubectl expose deployment postgres-scale-out --port=5432
+
+kubectl run scaleout --image=aborek/docker-scale-out --port=8088
+kubectl expose deployment scaleout --port=8088
+curl -H "Authorization: Basic $(echo -n 'admin:admin' | base64)" {IP}:8088/ping2
+curl -H "Authorization: Basic $(echo -n 'admin:admin' | base64)" 10.0.0.253:8088/ping2
+kubectl scale deployment scaleout --replicas=3
+ab -c 1 -t 5 -H "Authorization: Basic $(echo -n 'admin:admin' | base64)" 10.0.0.253:8088/ping2
+kubectl delete deployment,service scaleout
